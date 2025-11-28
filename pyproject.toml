@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bittorch"
-version = "0.1.5"
+version = "0.2.0"
 description = "High-performance low-precision backend for PyTorch"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -51,4 +51,9 @@ python_functions = ["test_*"]
 addopts = "-v"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
 ]
