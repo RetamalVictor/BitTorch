@@ -73,14 +73,35 @@ uv run python examples/mnist_mlp_ternary.py --compare --epochs 5
 
 ## Benchmark Results
 
-MNIST MLP (784 → 256 → 128 → 10), 5 epochs:
+### Training Accuracy (MNIST MLP)
 
-| Model | Test Accuracy | Epoch Time |
-|-------|---------------|------------|
-| FP32 nn.Linear | 97.3% | 2.4s |
-| TernaryLinear (CUDA) | 94.3% | 2.3s |
+784 → 256 → 128 → 10, 5 epochs:
 
-The ~3% accuracy gap is expected for 1.58-bit quantization. Benefits increase with model size and optimized kernels.
+| Model | Test Accuracy |
+|-------|---------------|
+| FP32 nn.Linear | 97.3% |
+| TernaryLinear (CUDA) | 94.3% |
+
+The ~3% accuracy gap is expected for 1.58-bit quantization.
+
+### Forward Pass Performance
+
+GPU: NVIDIA RTX A2000 8GB Laptop GPU
+
+| Shape (B,K,N) | nn.Linear FP32 | nn.Linear FP16 | TernaryLinearCUDA | Ratio vs FP32 |
+|---------------|----------------|----------------|-------------------|---------------|
+| (32, 256, 256) | 0.03 ms | 0.02 ms | 0.19 ms | 6.9x slower |
+| (64, 1024, 4096) | 0.26 ms | 0.10 ms | 8.7 ms | 33x slower |
+| (16, 4096, 4096) | 0.64 ms | 0.28 ms | 14.4 ms | 23x slower |
+
+**Note:** Current CUDA kernel is a baseline implementation (one thread per output).
+Optimized kernels with tiling and shared memory are planned for v0.1.3.
+
+Run benchmarks yourself:
+```bash
+uv run python benchmark/bench_ternary_vs_linear.py --shapes all
+uv run python benchmark/bench_ternary_kernel_only.py  # Raw kernel timing
+```
 
 ## API Reference
 
@@ -122,17 +143,18 @@ y = x @ (w_tern * scale).T + bias
 
 ## Project Status
 
-**v0.1.0** - First release with:
+**v0.1.1** - Current release:
 - [x] Ternary quantization with STE
-- [x] CUDA forward kernel
+- [x] CUDA forward kernel (baseline)
 - [x] Training support (PyTorch backward)
+- [x] Gradient consistency between Python and CUDA
 - [x] XOR and MNIST examples
-- [x] 94 tests passing
+- [x] 102 tests passing
 
 Coming in future versions:
-- Optimized kernels (tiling, shared memory)
+- Optimized kernels (tiling, shared memory) - v0.1.3
+- Extended examples (character LM) - v0.1.4
 - INT4 quantization path
-- Transformer / LLM integration
 
 ## License
 
