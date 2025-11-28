@@ -12,6 +12,7 @@ ext_modules = [
         sources=[
             "csrc/core/dispatch.cpp",
             "csrc/bindings/bittorch_bindings.cpp",
+            "csrc/kernels/ternary_gemm.cu",
         ],
         include_dirs=[
             os.path.join(ROOT_DIR, "csrc"),

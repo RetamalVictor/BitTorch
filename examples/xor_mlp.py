@@ -6,7 +6,10 @@ can converge on a trivial problem (XOR truth table).
 
 Usage:
     uv run python examples/xor_mlp.py
+    uv run python examples/xor_mlp.py --cuda   # Use CUDA-accelerated backend
 """
+
+import argparse
 
 import torch
 import torch.nn as nn
@@ -20,9 +23,17 @@ class XORNet(nn.Module):
     Architecture: 2 → 4 → 1
     """
 
-    def __init__(self, use_ternary: bool = True):
+    def __init__(self, use_ternary: bool = True, use_cuda_backend: bool = False):
         super().__init__()
-        Linear = TernaryLinear if use_ternary else nn.Linear
+
+        if use_ternary:
+            if use_cuda_backend:
+                from bittorch.nn import TernaryLinearCUDA
+                Linear = TernaryLinearCUDA
+            else:
+                Linear = TernaryLinear
+        else:
+            Linear = nn.Linear
 
         self.fc1 = Linear(2, 4)
         self.fc2 = Linear(4, 1)
@@ -34,23 +45,38 @@ class XORNet(nn.Module):
         return x
 
 
-def get_xor_data() -> tuple[torch.Tensor, torch.Tensor]:
-    """Get XOR truth table as tensors.
+def get_xor_data(
+    n_per_quadrant: int = 250,
+    noise: float = 0.1
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Generate a training-ready XOR dataset with many samples around each corner.
+
+    Args:
+        n_per_quadrant: Number of samples to generate for each of the four XOR input regions.
+        noise: Standard deviation of Gaussian noise added around each XOR corner.
 
     Returns:
-        Tuple of (inputs, targets) where:
-            inputs: shape (4, 2) - all XOR input combinations
-            targets: shape (4, 1) - XOR outputs
+        A tuple (inputs, targets) where:
+            inputs: Tensor of shape (4 * n_per_quadrant, 2) containing noisy samples
+                    around the four canonical XOR input points.
+            targets: Tensor of shape (4 * n_per_quadrant, 1) with corresponding XOR labels.
     """
-    inputs = torch.tensor(
-        [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]], dtype=torch.float32
-    )
-    targets = torch.tensor([[0.0], [1.0], [1.0], [0.0]], dtype=torch.float32)
-    return inputs, targets
+    centers = torch.tensor([[0., 0.], [0., 1.], [1., 0.], [1., 1.]], dtype=torch.float32)
+    labels = torch.tensor([0., 1., 1., 0.], dtype=torch.float32)
 
+    idx = torch.repeat_interleave(torch.arange(4), n_per_quadrant)
+    base = centers[idx]
+    jitter = torch.randn_like(base) * noise
+
+    inputs = base + jitter
+    targets = labels[idx].unsqueeze(1)
+
+    return inputs, targets
 
 def train_xor(
     use_ternary: bool = True,
+    use_cuda_backend: bool = False,
     num_steps: int = 2000,
     lr: float = 0.01,
     print_every: int = 200,
@@ -60,6 +86,7 @@ def train_xor(
 
     Args:
         use_ternary: If True, use TernaryLinear. If False, use nn.Linear.
+        use_cuda_backend: If True, use TernaryLinearCUDA (requires CUDA).
         num_steps: Number of training steps.
         lr: Learning rate.
         print_every: Print loss every N steps.
@@ -70,9 +97,13 @@ def train_xor(
     """
     torch.manual_seed(seed)
 
+    device = "cuda" if use_cuda_backend else "cpu"
+
     # Create model and data
-    model = XORNet(use_ternary=use_ternary)
+    model = XORNet(use_ternary=use_ternary, use_cuda_backend=use_cuda_backend)
+    model = model.to(device)
     inputs, targets = get_xor_data()
+    inputs, targets = inputs.to(device), targets.to(device)
 
     # Optimizer and loss
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -99,63 +130,136 @@ def train_xor(
     return model, loss_history
 
 
-def evaluate_xor(model: XORNet) -> None:
-    """Evaluate model on XOR truth table and print results."""
-    inputs, targets = get_xor_data()
+def evaluate_xor(
+    model: XORNet, n_per_quadrant: int = 250, noise: float = 0.1, device: str = "cpu"
+) -> dict:
+    """Evaluate model on XOR dataset and return statistics.
+
+    Args:
+        model: Trained XORNet model.
+        n_per_quadrant: Number of samples per quadrant for evaluation.
+        noise: Noise level for sample generation.
+        device: Device to run evaluation on.
+
+    Returns:
+        Dictionary with evaluation statistics.
+    """
+    inputs, targets = get_xor_data(n_per_quadrant=n_per_quadrant, noise=noise)
+    inputs, targets = inputs.to(device), targets.to(device)
 
     model.eval()
     with torch.no_grad():
         outputs = model(inputs)
-        predictions = torch.sigmoid(outputs)
+        probs = torch.sigmoid(outputs)
+        preds = (probs > 0.5).float()
 
-    print("\nXOR Evaluation:")
-    print("-" * 40)
-    print("Input     | Target | Prediction | Correct")
-    print("-" * 40)
+    # Overall metrics
+    correct = (preds == targets).sum().item()
+    total = len(targets)
+    accuracy = correct / total
 
-    correct = 0
-    for i in range(4):
-        inp = inputs[i].tolist()
-        target = targets[i].item()
-        pred = predictions[i].item()
-        pred_class = 1.0 if pred > 0.5 else 0.0
-        is_correct = pred_class == target
-        correct += is_correct
+    # Per-quadrant analysis
+    samples_per_q = n_per_quadrant
+    quadrant_stats = []
+    quadrant_labels = ["(0,0)→0", "(0,1)→1", "(1,0)→1", "(1,1)→0"]
 
-        print(f"{inp[0]:.0f}, {inp[1]:.0f}    |  {target:.0f}     |   {pred:.4f}   | {'✓' if is_correct else '✗'}")
+    for q in range(4):
+        start, end = q * samples_per_q, (q + 1) * samples_per_q
+        q_preds = preds[start:end]
+        q_targets = targets[start:end]
+        q_probs = probs[start:end]
 
-    print("-" * 40)
-    print(f"Accuracy: {correct}/4 ({100 * correct / 4:.0f}%)")
+        q_correct = (q_preds == q_targets).sum().item()
+        q_acc = q_correct / samples_per_q
+        q_mean_prob = q_probs.mean().item()
+        q_std_prob = q_probs.std().item()
+
+        quadrant_stats.append({
+            "label": quadrant_labels[q],
+            "accuracy": q_acc,
+            "mean_prob": q_mean_prob,
+            "std_prob": q_std_prob,
+        })
+
+    # Print summary
+    print(f"\nXOR Evaluation ({total} samples, noise={noise}):")
+    print("-" * 50)
+    print(f"Overall Accuracy: {accuracy:.2%} ({correct}/{total})")
+    print("\nPer-quadrant breakdown:")
+    print(f"{'Quadrant':<12} | {'Acc':>6} | {'Mean Prob':>10} | {'Std':>6}")
+    print("-" * 50)
+    for s in quadrant_stats:
+        print(f"{s['label']:<12} | {s['accuracy']:>5.1%} | {s['mean_prob']:>10.4f} | {s['std_prob']:>6.4f}")
+    print("-" * 50)
+
+    return {
+        "accuracy": accuracy,
+        "total": total,
+        "correct": correct,
+        "quadrants": quadrant_stats,
+    }
 
 
 def main():
     """Main function to run XOR training experiment."""
+    parser = argparse.ArgumentParser(description="XOR MLP Training with TernaryLinear")
+    parser.add_argument(
+        "--cuda", action="store_true", help="Use CUDA-accelerated TernaryLinearCUDA"
+    )
+    parser.add_argument(
+        "--steps", type=int, default=2000, help="Number of training steps"
+    )
+    parser.add_argument("--lr", type=float, default=0.01, help="Learning rate")
+    args = parser.parse_args()
+
+    use_cuda = args.cuda
+    device = "cuda" if use_cuda else "cpu"
+
+    if use_cuda and not torch.cuda.is_available():
+        print("CUDA requested but not available. Falling back to CPU.")
+        use_cuda = False
+        device = "cpu"
+
+    backend_name = "TernaryLinearCUDA" if use_cuda else "TernaryLinear"
+
     print("=" * 50)
-    print("XOR MLP Training with TernaryLinear")
+    print(f"XOR MLP Training with {backend_name}")
+    print(f"Device: {device}")
     print("=" * 50)
 
     # Train with ternary weights
-    print("\n--- Training with TernaryLinear ---")
-    model_ternary, losses_ternary = train_xor(use_ternary=True, num_steps=2000, lr=0.01)
-    evaluate_xor(model_ternary)
+    print(f"\n--- Training with {backend_name} ---")
+    model_ternary, losses_ternary = train_xor(
+        use_ternary=True,
+        use_cuda_backend=use_cuda,
+        num_steps=args.steps,
+        lr=args.lr,
+    )
+    evaluate_xor(model_ternary, device=device)
 
     # Compare with standard Linear (optional)
     print("\n--- Training with nn.Linear (baseline) ---")
-    model_fp, losses_fp = train_xor(use_ternary=False, num_steps=2000, lr=0.01)
-    evaluate_xor(model_fp)
+    model_fp, losses_fp = train_xor(
+        use_ternary=False,
+        use_cuda_backend=False,  # nn.Linear doesn't need CUDA backend flag
+        num_steps=args.steps,
+        lr=args.lr,
+    )
+    # Keep baseline on CPU for simplicity
+    evaluate_xor(model_fp, device="cpu")
 
     # Print quantized weights for inspection
-    print("\n--- Quantized Weights (TernaryLinear) ---")
+    print(f"\n--- Quantized Weights ({backend_name}) ---")
     for name, module in model_ternary.named_modules():
-        if isinstance(module, TernaryLinear):
+        if hasattr(module, "get_quantized_weight"):
             w_tern, scale = module.get_quantized_weight()
             print(f"\n{name}:")
-            print(f"  w_tern:\n{w_tern}")
-            print(f"  scale: {scale}")
+            print(f"  w_tern:\n{w_tern.cpu()}")
+            print(f"  scale: {scale.cpu()}")
 
     # Final comparison
     print("\n--- Final Loss Comparison ---")
-    print(f"TernaryLinear final loss: {losses_ternary[-1]:.6f}")
+    print(f"{backend_name} final loss: {losses_ternary[-1]:.6f}")
     print(f"nn.Linear final loss:     {losses_fp[-1]:.6f}")
 
 
