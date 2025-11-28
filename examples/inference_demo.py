@@ -4,15 +4,18 @@
 This example shows:
 1. Creating a model with TernaryLinear (for training)
 2. Converting to TernaryLinearInference (for deployment)
-3. Comparing memory usage
-4. Running inference with packed weights
+3. Comparing parameter memory usage
+4. Comparing runtime memory usage (CUDA only)
+5. Running inference with packed weights
 
 Usage:
     uv run python examples/inference_demo.py
     uv run python examples/inference_demo.py --cuda
+    uv run python examples/inference_demo.py --cuda --hidden 1024
 """
 
 import argparse
+import gc
 
 import torch
 import torch.nn as nn
@@ -151,23 +154,64 @@ def main():
     counts = count_ternary_params(converted_model)
     print(f"Parameter counts: {counts}")
 
+    # Runtime memory measurement (CUDA only)
+    if device == "cuda":
+        print()
+        print("=" * 60)
+        print("5. Runtime Memory Usage (CUDA)")
+        print("=" * 60)
+
+        def measure_forward_memory(model, x, name):
+            """Measure peak GPU memory during forward pass."""
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+
+            with torch.no_grad():
+                _ = model(x)
+            torch.cuda.synchronize()
+
+            peak = torch.cuda.max_memory_allocated()
+            print(f"{name}: {peak:,} bytes ({peak/1024/1024:.2f} MB)")
+            return peak
+
+        # Measure each model
+        x_cuda = torch.randn(args.batch, in_features, device='cuda')
+        fp32_runtime = measure_forward_memory(fp32_model, x_cuda, "FP32 forward")
+        train_runtime = measure_forward_memory(ternary_model, x_cuda, "Ternary training forward")
+        infer_runtime = measure_forward_memory(infer_model, x_cuda, "Ternary inference forward")
+
+        print()
+        print("Runtime memory comparison:")
+        print(f"  Inference vs FP32: {fp32_runtime/infer_runtime:.1f}x less")
+        print(f"  Inference vs Training: {train_runtime/infer_runtime:.1f}x less")
+        print()
+        print("Note: The packed CUDA kernel reads 2-bit weights directly,")
+        print("never allocating a full [N, K] weight tensor in GPU memory.")
+
     print()
     print("=" * 60)
-    print("5. Summary")
+    print("6. Summary")
     print("=" * 60)
 
     print(f"""
-    Model Type              | Memory (KB) | Reduction
-    ------------------------|-------------|----------
-    FP32 baseline           | {fp32_mem['total']/1024:>9.1f} | 1.0x
-    Ternary (training)      | {ternary_train_mem['total']/1024:>9.1f} | 1.0x
-    Ternary (inference)     | {infer_mem['total']/1024:>9.1f} | {reduction:.1f}x
+    Model Type              | Param Mem (KB) | Reduction
+    ------------------------|----------------|----------
+    FP32 baseline           | {fp32_mem['total']/1024:>12.1f} | 1.0x
+    Ternary (training)      | {ternary_train_mem['total']/1024:>12.1f} | 1.0x
+    Ternary (inference)     | {infer_mem['total']/1024:>12.1f} | {reduction:.1f}x
 
-    The packed inference model achieves {reduction:.1f}x memory reduction
-    while producing numerically equivalent outputs.
+    The packed inference model achieves {reduction:.1f}x parameter memory
+    reduction while producing numerically equivalent outputs.
+
+    On CUDA, the packed kernel also reduces runtime memory by avoiding
+    the allocation of full weight tensors during forward pass.
 
     For deployment on memory-constrained devices (like Jetson),
     use TernaryLinearInference after training with TernaryLinear.
+
+    For detailed benchmarks, run:
+        uv run python benchmark/bench_packed_inference.py --cuda
     """)
 
 
