@@ -163,3 +163,121 @@ class TestTernaryQuantConfig:
 
         assert config.threshold_factor == 0.1
         assert config.per_channel is False
+
+
+class TestTernaryQuantizeEdgeCases:
+    """Edge case tests for ternary quantization."""
+
+    def test_single_element_tensor(self):
+        """Single element tensor should work."""
+        weight = torch.tensor([[2.5]])
+        w_tern, scale = ternary_quantize(weight)
+
+        assert w_tern.shape == (1, 1)
+        assert w_tern[0, 0] == 1.0
+        assert scale[0] == 2.5
+
+    def test_extreme_threshold_zero(self):
+        """Threshold factor of 0 should produce no zeros (except actual zeros)."""
+        weight = torch.randn(32, 64)
+        w_tern, _ = ternary_quantize(weight, threshold_factor=0.0)
+
+        # With threshold=0, only actual zeros in weight become 0
+        # All non-zeros become +/-1
+        num_zeros = (w_tern == 0).sum().item()
+        original_zeros = (weight == 0).sum().item()
+        assert num_zeros == original_zeros
+
+    def test_extreme_threshold_one(self):
+        """Threshold factor of 1 should produce all zeros."""
+        weight = torch.randn(32, 64)
+        w_tern, _ = ternary_quantize(weight, threshold_factor=1.0)
+
+        # With threshold = max(|w|), all weights are below threshold
+        assert (w_tern == 0).all()
+
+    def test_very_small_weights(self):
+        """Very small weights should handle without numerical issues."""
+        weight = torch.randn(32, 64) * 1e-10
+        w_tern, scale = ternary_quantize(weight)
+
+        assert not torch.isnan(w_tern).any()
+        assert not torch.isnan(scale).any()
+        assert not torch.isinf(w_tern).any()
+        assert not torch.isinf(scale).any()
+
+    def test_very_large_weights(self):
+        """Very large weights should handle without numerical issues."""
+        weight = torch.randn(32, 64) * 1e10
+        w_tern, scale = ternary_quantize(weight)
+
+        assert not torch.isnan(w_tern).any()
+        assert not torch.isnan(scale).any()
+        assert not torch.isinf(w_tern).any()
+        # Scale can be large but should not be inf
+        assert not torch.isinf(scale).any()
+
+    def test_all_positive_weights(self):
+        """All positive weights should produce only 0 and +1."""
+        weight = torch.abs(torch.randn(32, 64)) + 0.1  # Ensure all positive
+        w_tern, _ = ternary_quantize(weight, threshold_factor=0.05)
+
+        unique = torch.unique(w_tern)
+        for val in unique:
+            assert val.item() in [0.0, 1.0]
+
+    def test_all_negative_weights(self):
+        """All negative weights should produce only 0 and -1."""
+        weight = -torch.abs(torch.randn(32, 64)) - 0.1  # Ensure all negative
+        w_tern, _ = ternary_quantize(weight, threshold_factor=0.05)
+
+        unique = torch.unique(w_tern)
+        for val in unique:
+            assert val.item() in [0.0, -1.0]
+
+    def test_uniform_weights(self):
+        """Uniform weights should quantize consistently."""
+        weight = torch.ones(32, 64) * 0.5
+        w_tern, scale = ternary_quantize(weight)
+
+        # All weights are the same and above threshold
+        assert (w_tern == 1.0).all()
+        assert (scale == 0.5).all()
+
+    def test_mixed_magnitude_per_channel(self):
+        """Per-channel scaling should handle different magnitudes per row."""
+        weight = torch.zeros(3, 4)
+        weight[0] = torch.tensor([1.0, 2.0, 3.0, 4.0])  # Scale = 4
+        weight[1] = torch.tensor([0.1, 0.2, 0.3, 0.4])  # Scale = 0.4
+        weight[2] = torch.tensor([10.0, 20.0, 30.0, 40.0])  # Scale = 40
+
+        w_tern, scale = ternary_quantize(weight, per_channel=True)
+
+        assert scale[0].item() == 4.0
+        assert scale[1].item() == pytest.approx(0.4)
+        assert scale[2].item() == 40.0
+
+    def test_single_row_tensor(self):
+        """Single row (1, N) tensor should work."""
+        weight = torch.randn(1, 100)
+        w_tern, scale = ternary_quantize(weight)
+
+        assert w_tern.shape == (1, 100)
+        assert scale.shape == (1,)
+
+    def test_single_column_tensor(self):
+        """Single column (N, 1) tensor should work."""
+        weight = torch.randn(100, 1)
+        w_tern, scale = ternary_quantize(weight)
+
+        assert w_tern.shape == (100, 1)
+        assert scale.shape == (100,)
+
+    def test_reproducibility_with_same_input(self):
+        """Same input should always produce same output."""
+        weight = torch.randn(32, 64)
+        w_tern1, scale1 = ternary_quantize(weight.clone())
+        w_tern2, scale2 = ternary_quantize(weight.clone())
+
+        assert torch.equal(w_tern1, w_tern2)
+        assert torch.equal(scale1, scale2)

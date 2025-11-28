@@ -193,3 +193,129 @@ class TestTernaryLinearNumerics:
 
         assert not torch.isnan(y).any()
         assert not torch.isinf(y).any()
+
+
+class TestTernaryLinearDebugMode:
+    """Tests for TernaryLinear debug mode (quantize=False)."""
+
+    def test_debug_mode_matches_nn_linear(self):
+        """With quantize=False, TernaryLinear should match nn.Linear exactly."""
+        torch.manual_seed(42)
+
+        # Create TernaryLinear in debug mode
+        ternary_layer = TernaryLinear(64, 32, quantize=False)
+
+        # Create nn.Linear with same weights
+        linear_layer = nn.Linear(64, 32)
+        with torch.no_grad():
+            linear_layer.weight.copy_(ternary_layer.weight)
+            linear_layer.bias.copy_(ternary_layer.bias)
+
+        # Compare outputs
+        x = torch.randn(8, 64)
+        y_ternary = ternary_layer(x)
+        y_linear = linear_layer(x)
+
+        assert torch.allclose(y_ternary, y_linear, atol=1e-6)
+
+    def test_debug_mode_no_bias_matches_nn_linear(self):
+        """Debug mode without bias should match nn.Linear without bias."""
+        torch.manual_seed(42)
+
+        ternary_layer = TernaryLinear(64, 32, bias=False, quantize=False)
+        linear_layer = nn.Linear(64, 32, bias=False)
+
+        with torch.no_grad():
+            linear_layer.weight.copy_(ternary_layer.weight)
+
+        x = torch.randn(8, 64)
+        y_ternary = ternary_layer(x)
+        y_linear = linear_layer(x)
+
+        assert torch.allclose(y_ternary, y_linear, atol=1e-6)
+
+    def test_debug_mode_gradients_match_nn_linear(self):
+        """Gradients in debug mode should match nn.Linear."""
+        torch.manual_seed(42)
+
+        ternary_layer = TernaryLinear(64, 32, quantize=False)
+        linear_layer = nn.Linear(64, 32)
+
+        with torch.no_grad():
+            linear_layer.weight.copy_(ternary_layer.weight)
+            linear_layer.bias.copy_(ternary_layer.bias)
+
+        x = torch.randn(8, 64)
+        target = torch.randn(8, 32)
+
+        # Forward and backward for both
+        y_ternary = ternary_layer(x)
+        loss_ternary = nn.functional.mse_loss(y_ternary, target)
+        loss_ternary.backward()
+
+        y_linear = linear_layer(x)
+        loss_linear = nn.functional.mse_loss(y_linear, target)
+        loss_linear.backward()
+
+        # Gradients should match
+        assert torch.allclose(
+            ternary_layer.weight.grad, linear_layer.weight.grad, atol=1e-6
+        )
+        assert torch.allclose(
+            ternary_layer.bias.grad, linear_layer.bias.grad, atol=1e-6
+        )
+
+    def test_quantize_true_differs_from_nn_linear(self):
+        """With quantize=True, output should differ from nn.Linear."""
+        torch.manual_seed(42)
+
+        ternary_layer = TernaryLinear(64, 32, quantize=True)
+        linear_layer = nn.Linear(64, 32)
+
+        with torch.no_grad():
+            linear_layer.weight.copy_(ternary_layer.weight)
+            linear_layer.bias.copy_(ternary_layer.bias)
+
+        x = torch.randn(8, 64)
+        y_ternary = ternary_layer(x)
+        y_linear = linear_layer(x)
+
+        # With quantization, outputs should differ
+        assert not torch.allclose(y_ternary, y_linear, atol=1e-3)
+
+    def test_can_toggle_quantize_at_runtime(self):
+        """Quantization can be toggled at runtime."""
+        layer = TernaryLinear(64, 32)
+        x = torch.randn(8, 64)
+
+        # Get output with quantization
+        layer.quantize = True
+        y_quantized = layer(x).clone()
+
+        # Get output without quantization
+        layer.quantize = False
+        y_unquantized = layer(x)
+
+        # They should differ
+        assert not torch.allclose(y_quantized, y_unquantized, atol=1e-3)
+
+        # Toggle back
+        layer.quantize = True
+        y_quantized_again = layer(x)
+
+        # Should match original quantized output
+        assert torch.allclose(y_quantized, y_quantized_again)
+
+    def test_extra_repr_shows_quantize_false(self):
+        """Extra repr should show quantize=False in debug mode."""
+        layer = TernaryLinear(64, 32, quantize=False)
+        repr_str = layer.extra_repr()
+
+        assert "quantize=False" in repr_str
+
+    def test_extra_repr_shows_quantize_true(self):
+        """Extra repr should show quantize=True by default."""
+        layer = TernaryLinear(64, 32)
+        repr_str = layer.extra_repr()
+
+        assert "quantize=True" in repr_str

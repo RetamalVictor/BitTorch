@@ -32,6 +32,8 @@ class TernaryLinear(nn.Module):
         bias: If True, adds a learnable bias. Default: True
         threshold_factor: Factor for ternary quantization threshold. Default: 0.05
         per_channel: If True, use per-channel scaling. Default: True
+        quantize: If True, apply ternary quantization. If False, behaves like
+            standard nn.Linear (useful for debugging/comparison). Default: True
 
     Shape:
         - Input: (*, in_features) where * means any number of batch dimensions
@@ -47,6 +49,9 @@ class TernaryLinear(nn.Module):
         >>> y = layer(x)
         >>> y.shape
         torch.Size([8, 32])
+
+        >>> # Debug mode: behaves like nn.Linear
+        >>> layer_debug = TernaryLinear(64, 32, quantize=False)
     """
 
     def __init__(
@@ -56,12 +61,14 @@ class TernaryLinear(nn.Module):
         bias: bool = True,
         threshold_factor: float = 0.05,
         per_channel: bool = True,
+        quantize: bool = True,
     ) -> None:
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.threshold_factor = threshold_factor
         self.per_channel = per_channel
+        self.quantize = quantize
 
         # Master weights in full precision
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
@@ -89,6 +96,10 @@ class TernaryLinear(nn.Module):
         Returns:
             Output tensor of shape (*, out_features)
         """
+        if not self.quantize:
+            # Debug mode: behave like standard nn.Linear
+            return F.linear(x, self.weight, self.bias)
+
         # Quantize weights with STE for gradient flow
         w_tern, scale = ternary_quantize_ste(
             self.weight,
@@ -111,7 +122,8 @@ class TernaryLinear(nn.Module):
             f"out_features={self.out_features}, "
             f"bias={self.bias is not None}, "
             f"threshold_factor={self.threshold_factor}, "
-            f"per_channel={self.per_channel}"
+            f"per_channel={self.per_channel}, "
+            f"quantize={self.quantize}"
         )
 
     def get_quantized_weight(self) -> tuple[Tensor, Tensor]:
