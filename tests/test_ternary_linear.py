@@ -319,3 +319,126 @@ class TestTernaryLinearDebugMode:
         repr_str = layer.extra_repr()
 
         assert "quantize=True" in repr_str
+
+
+class TestTernaryLinearBackend:
+    """Tests for TernaryLinear backend parameter."""
+
+    def test_backend_default_is_auto(self):
+        """Default backend should be 'auto'."""
+        layer = TernaryLinear(64, 32)
+        assert layer.backend == "auto"
+
+    def test_backend_python(self):
+        """backend='python' should work on CPU."""
+        layer = TernaryLinear(64, 32, backend="python")
+        x = torch.randn(8, 64)
+        y = layer(x)
+
+        assert y.shape == (8, 32)
+        assert layer.backend == "python"
+
+    def test_backend_auto(self):
+        """backend='auto' should work on CPU."""
+        layer = TernaryLinear(64, 32, backend="auto")
+        x = torch.randn(8, 64)
+        y = layer(x)
+
+        assert y.shape == (8, 32)
+        assert layer.backend == "auto"
+
+    def test_backend_invalid_raises_error(self):
+        """Invalid backend should raise ValueError."""
+        with pytest.raises(ValueError, match="backend must be"):
+            TernaryLinear(64, 32, backend="invalid")
+
+    def test_backend_cuda_on_cpu_raises_error(self):
+        """backend='cuda' on CPU should raise error."""
+        layer = TernaryLinear(64, 32, backend="cuda")
+        x = torch.randn(8, 64)
+
+        with pytest.raises(RuntimeError, match="requires input and weights on CUDA"):
+            layer(x)
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_backend_cuda_on_cuda(self):
+        """backend='cuda' should work on CUDA."""
+        layer = TernaryLinear(64, 32, backend="cuda").cuda()
+        x = torch.randn(8, 64, device="cuda")
+        y = layer(x)
+
+        assert y.shape == (8, 32)
+        assert y.device.type == "cuda"
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_backend_python_on_cuda(self):
+        """backend='python' should work on CUDA (uses Python fallback)."""
+        layer = TernaryLinear(64, 32, backend="python").cuda()
+        x = torch.randn(8, 64, device="cuda")
+        y = layer(x)
+
+        assert y.shape == (8, 32)
+        assert y.device.type == "cuda"
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_backend_auto_on_cuda_uses_cuda_kernel(self):
+        """backend='auto' on CUDA should use CUDA kernel."""
+        layer = TernaryLinear(64, 32, backend="auto").cuda()
+        x = torch.randn(8, 64, device="cuda")
+        y = layer(x)
+
+        assert y.shape == (8, 32)
+        # Should use CUDA kernel (we can't easily verify which path was taken,
+        # but we can verify correctness)
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_backend_python_vs_cuda_results_match(self):
+        """Python and CUDA backends should produce similar results."""
+        torch.manual_seed(42)
+
+        layer_python = TernaryLinear(64, 32, backend="python").cuda()
+        layer_cuda = TernaryLinear(64, 32, backend="cuda").cuda()
+
+        # Copy weights
+        with torch.no_grad():
+            layer_cuda.weight.copy_(layer_python.weight)
+            layer_cuda.bias.copy_(layer_python.bias)
+
+        x = torch.randn(8, 64, device="cuda")
+        y_python = layer_python(x)
+        y_cuda = layer_cuda(x)
+
+        # Results should be close (may differ slightly due to floating point)
+        assert torch.allclose(y_python, y_cuda, atol=1e-5)
+
+    def test_extra_repr_shows_backend(self):
+        """Extra repr should show backend parameter."""
+        layer = TernaryLinear(64, 32, backend="python")
+        repr_str = layer.extra_repr()
+
+        assert "backend='python'" in repr_str
+
+    def test_use_cuda_kernel_deprecated_true(self):
+        """use_cuda_kernel=True should trigger deprecation warning."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            layer = TernaryLinear(64, 32, use_cuda_kernel=True)
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "deprecated" in str(w[0].message).lower()
+            assert layer.backend == "auto"
+
+    def test_use_cuda_kernel_deprecated_false(self):
+        """use_cuda_kernel=False should trigger deprecation warning."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            layer = TernaryLinear(64, 32, use_cuda_kernel=False)
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert layer.backend == "python"

@@ -4,7 +4,7 @@ This module implements a linear layer where weights are quantized to ternary val
 {-1, 0, +1} during the forward pass, with gradients flowing through via STE.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,9 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from ..quant.ternary import TernaryQuantConfig, ternary_quantize_ste
+
+
+BackendType = Literal["auto", "cuda", "python"]
 
 
 def _cuda_kernel_available() -> bool:
@@ -35,9 +38,11 @@ class TernaryLinear(nn.Module):
 
     Where w_tern ∈ {-1, 0, +1} and scale is per-channel.
 
-    When running on CUDA with `use_cuda_kernel=True` (default), the forward
-    pass automatically uses the optimized CUDA kernel. Falls back to pure
-    Python implementation on CPU or when kernel is unavailable.
+    Backend selection:
+        - "auto" (default): Uses CUDA kernel when on GPU and available,
+          otherwise falls back to pure Python implementation.
+        - "cuda": Forces CUDA kernel (raises error if unavailable or on CPU).
+        - "python": Forces pure Python implementation (useful for debugging).
 
     Args:
         in_features: Size of each input sample
@@ -47,8 +52,12 @@ class TernaryLinear(nn.Module):
         per_channel: If True, use per-channel scaling. Default: True
         quantize: If True, apply ternary quantization. If False, behaves like
             standard nn.Linear (useful for debugging/comparison). Default: True
-        use_cuda_kernel: If True, automatically use CUDA kernel when on GPU.
-            Default: True
+        backend: Backend to use for forward pass. One of:
+            - "auto": Automatically select best backend (default)
+            - "cuda": Force CUDA kernel (error if unavailable)
+            - "python": Force pure Python implementation
+        use_cuda_kernel: Deprecated. Use backend="auto" (True) or backend="python"
+            (False) instead. Kept for backward compatibility.
 
     Shape:
         - Input: (*, in_features) where * means any number of batch dimensions
@@ -70,6 +79,11 @@ class TernaryLinear(nn.Module):
         >>> x = torch.randn(8, 64, device='cuda')
         >>> y = layer(x)  # Uses CUDA kernel
 
+        >>> # Force Python backend (useful for debugging)
+        >>> layer = TernaryLinear(64, 32, backend="python").cuda()
+        >>> x = torch.randn(8, 64, device='cuda')
+        >>> y = layer(x)  # Uses Python even on CUDA
+
         >>> # Debug mode: behaves like nn.Linear
         >>> layer_debug = TernaryLinear(64, 32, quantize=False)
     """
@@ -82,7 +96,8 @@ class TernaryLinear(nn.Module):
         threshold_factor: float = 0.05,
         per_channel: bool = True,
         quantize: bool = True,
-        use_cuda_kernel: bool = True,
+        backend: BackendType = "auto",
+        use_cuda_kernel: Optional[bool] = None,
     ) -> None:
         super().__init__()
         self.in_features = in_features
@@ -90,7 +105,24 @@ class TernaryLinear(nn.Module):
         self.threshold_factor = threshold_factor
         self.per_channel = per_channel
         self.quantize = quantize
-        self.use_cuda_kernel = use_cuda_kernel
+
+        # Handle backend parameter with backward compatibility
+        if use_cuda_kernel is not None:
+            # Legacy parameter: use_cuda_kernel=True -> auto, False -> python
+            import warnings
+            warnings.warn(
+                "use_cuda_kernel is deprecated, use backend='auto'|'cuda'|'python' instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.backend = "auto" if use_cuda_kernel else "python"
+        else:
+            if backend not in ("auto", "cuda", "python"):
+                raise ValueError(f"backend must be 'auto', 'cuda', or 'python', got {backend!r}")
+            self.backend = backend
+
+        # Keep use_cuda_kernel for backward compatibility in extra_repr
+        self.use_cuda_kernel = self.backend != "python"
 
         # Master weights in full precision
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
@@ -111,12 +143,27 @@ class TernaryLinear(nn.Module):
 
     def _should_use_cuda_kernel(self, x: Tensor) -> bool:
         """Check if we should use CUDA kernel for this forward pass."""
-        return (
-            self.use_cuda_kernel
-            and x.is_cuda
-            and self.weight.is_cuda
-            and _cuda_kernel_available()
-        )
+        if self.backend == "python":
+            return False
+
+        on_cuda = x.is_cuda and self.weight.is_cuda
+        kernel_available = _cuda_kernel_available()
+
+        if self.backend == "cuda":
+            # Explicit CUDA requested - raise error if not possible
+            if not on_cuda:
+                raise RuntimeError(
+                    "backend='cuda' requires input and weights on CUDA device"
+                )
+            if not kernel_available:
+                raise RuntimeError(
+                    "backend='cuda' requires CUDA extension to be built. "
+                    "Rebuild with CUDA support or use backend='python'"
+                )
+            return True
+
+        # backend == "auto": use CUDA if available, otherwise Python
+        return on_cuda and kernel_available
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass with ternary quantized weights.
@@ -169,7 +216,7 @@ class TernaryLinear(nn.Module):
             f"threshold_factor={self.threshold_factor}, "
             f"per_channel={self.per_channel}, "
             f"quantize={self.quantize}, "
-            f"use_cuda_kernel={self.use_cuda_kernel}"
+            f"backend={self.backend!r}"
         )
 
     def get_quantized_weight(self) -> tuple[Tensor, Tensor]:
