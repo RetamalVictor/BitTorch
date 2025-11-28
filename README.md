@@ -71,6 +71,19 @@ uv run python examples/xor_mlp.py --cuda
 uv run python examples/mnist_mlp_ternary.py --compare --epochs 5
 ```
 
+### Character-Level Language Model
+
+```bash
+# Train ternary character LM
+uv run python examples/tiny_char_lm_ternary.py --epochs 5
+
+# Compare ternary vs FP32 perplexity
+uv run python examples/tiny_char_lm_ternary.py --compare --cuda
+
+# Download TinyShakespeare for larger training
+uv run python examples/tiny_char_lm_ternary.py --download --compare --cuda --epochs 10
+```
+
 ## Benchmark Results
 
 ### Training Accuracy (MNIST MLP)
@@ -115,9 +128,14 @@ TernaryLinear(
     threshold_factor: float = 0.05,  # Controls sparsity
     per_channel: bool = True,        # Per-channel vs global scaling
     quantize: bool = True,           # Set False for debug mode
-    use_cuda_kernel: bool = True,    # Auto-use CUDA when available
+    backend: str = "auto",           # "auto", "cuda", or "python"
 )
 ```
+
+Backend options:
+- `"auto"`: Uses CUDA kernel when on GPU and available, otherwise Python (default)
+- `"cuda"`: Forces CUDA kernel (raises error if unavailable or on CPU)
+- `"python"`: Forces pure Python implementation (useful for debugging)
 
 ### `bittorch.nn.TernaryLinearCUDA`
 
@@ -143,18 +161,21 @@ y = x @ (w_tern * scale).T + bias
 
 ## Project Status
 
-**v0.1.3** - Current release:
+**v0.1.5** - Current release:
 - [x] Ternary quantization with STE
 - [x] CUDA forward kernel (tiled, shared memory)
 - [x] Training support (PyTorch backward)
 - [x] Gradient consistency between Python and CUDA
-- [x] XOR and MNIST examples
-- [x] 120 tests passing
+- [x] XOR, MNIST, and character LM examples
+- [x] Backend parameter (`"auto"`, `"cuda"`, `"python"`)
+- [x] Robustness tests (various shapes, seeds, big shapes)
+- [x] Extensible quantization framework (ready for INT4)
+- [x] Developer documentation (CONTRIBUTING.md, kernel docs)
+- [x] 185+ tests passing
 
 Coming in future versions:
-- Extended examples (character LM) - v0.1.4
+- INT4 quantization implementation
 - Further kernel optimizations (vectorized loads)
-- INT4 quantization path
 
 ## License
 

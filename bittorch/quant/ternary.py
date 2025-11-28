@@ -4,26 +4,97 @@ This module implements ternary quantization where weights are mapped to {-1, 0, 
 with per-channel scaling factors. The quantization follows the BitNet b1.58 approach.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 import torch
 from torch import Tensor
 
+from .base import QuantConfig, Quantizer, QuantType, ScaleType
+
 
 @dataclass
-class TernaryQuantConfig:
+class TernaryQuantConfig(QuantConfig):
     """Configuration for ternary quantization.
+
+    Ternary quantization maps weights to {-1, 0, +1} with per-channel scaling.
+    This achieves approximately 1.58 bits per weight (log2(3) ≈ 1.58).
 
     Args:
         threshold_factor: Factor λ for computing threshold τ = λ * scale.
             Values in range [0.05, 0.1] work well. Default: 0.05
-        per_channel: If True, compute scale per output channel.
-            If False, use a single global scale. Default: True
+        per_channel: If True, use per-channel scaling. If False, use global.
+            Default: True
     """
-
     threshold_factor: float = 0.05
     per_channel: bool = True
+
+    def __post_init__(self):
+        # Sync scale_type with per_channel for internal consistency
+        if self.per_channel:
+            self.scale_type = ScaleType.PER_CHANNEL
+        else:
+            self.scale_type = ScaleType.PER_TENSOR
+
+    def validate(self) -> None:
+        """Validate ternary-specific parameters."""
+        super().validate()
+        if not 0.0 <= self.threshold_factor <= 1.0:
+            raise ValueError(
+                f"threshold_factor must be in [0, 1], got {self.threshold_factor}"
+            )
+
+
+class TernaryQuantizer(Quantizer):
+    """Quantizer for ternary (1.58-bit) weights.
+
+    Maps weights to {-1, 0, +1} with per-channel or global scaling.
+
+    Example:
+        >>> config = TernaryQuantConfig(threshold_factor=0.05)
+        >>> quantizer = TernaryQuantizer(config)
+        >>> w_tern, scale = quantizer.quantize(weight)
+        >>> w_recon = quantizer.dequantize(w_tern, scale)
+    """
+
+    def __init__(self, config: TernaryQuantConfig = None):
+        """Initialize ternary quantizer.
+
+        Args:
+            config: Ternary quantization config. If None, uses defaults.
+        """
+        if config is None:
+            config = TernaryQuantConfig()
+        super().__init__(config)
+        self._config: TernaryQuantConfig = config
+
+    @property
+    def quant_type(self) -> QuantType:
+        return QuantType.TERNARY
+
+    @property
+    def bits_per_weight(self) -> float:
+        return 1.58  # log2(3)
+
+    def quantize(self, weight: Tensor) -> Tuple[Tensor, Tensor]:
+        """Quantize weights to ternary {-1, 0, +1}."""
+        return ternary_quantize(
+            weight,
+            threshold_factor=self._config.threshold_factor,
+            per_channel=self._config.per_channel,
+        )
+
+    def dequantize(self, w_tern: Tensor, scale: Tensor) -> Tensor:
+        """Dequantize ternary weights back to full precision."""
+        return dequantize_ternary(w_tern, scale)
+
+    def quantize_ste(self, weight: Tensor) -> Tuple[Tensor, Tensor]:
+        """Quantize with STE for training."""
+        return ternary_quantize_ste(
+            weight,
+            threshold_factor=self._config.threshold_factor,
+            per_channel=self._config.per_channel,
+        )
 
 
 def ternary_quantize(
