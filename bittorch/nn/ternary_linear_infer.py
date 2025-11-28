@@ -78,26 +78,29 @@ class TernaryLinearInference(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass with packed ternary weights.
 
+        Uses CUDA kernel that reads packed weights directly when on GPU,
+        avoiding the memory overhead of unpacking. Falls back to CPU
+        unpack + matmul when not on CUDA.
+
         Args:
             x: Input tensor of shape (*, in_features)
 
         Returns:
             Output tensor of shape (*, out_features)
         """
-        # Unpack weights: (out_features, in_features) int8
-        w_tern = unpack_ternary(self.weight_packed, self.in_features)
+        if x.is_cuda:
+            # Use packed CUDA kernel - reads 2-bit weights directly
+            from ..ops.ternary_linear_packed import ternary_linear_packed_forward
 
-        # Convert to float for matmul
-        w_tern = w_tern.to(x.dtype)
-
-        # Apply scale: w_effective = w_tern * scale[:, None]
-        # scale shape: (out_features,) -> (out_features, 1)
-        w_effective = w_tern * self.scale.unsqueeze(1).to(x.dtype)
-
-        # Linear transformation: y = x @ w_effective.T
-        y = torch.nn.functional.linear(x, w_effective, self.bias)
-
-        return y
+            return ternary_linear_packed_forward(
+                x, self.weight_packed, self.scale, self.in_features, self.bias
+            )
+        else:
+            # CPU fallback: unpack + matmul (slow but simple)
+            w_tern = unpack_ternary(self.weight_packed, self.in_features)
+            w_tern = w_tern.to(x.dtype)
+            w_effective = w_tern * self.scale.unsqueeze(1).to(x.dtype)
+            return torch.nn.functional.linear(x, w_effective, self.bias)
 
     def extra_repr(self) -> str:
         """String representation with extra info."""
