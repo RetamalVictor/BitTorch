@@ -97,6 +97,10 @@ def ternary_quantize_ste(
         Forward: w_q (quantized values)
         Backward: gradient flows to w as if quantization was identity
 
+    Note: Scale is treated as a non-differentiable calibration statistic.
+    Gradients do NOT flow through scale, matching the CUDA kernel behavior.
+    This ensures consistent gradients between Python and CUDA implementations.
+
     Args:
         weight: Input weight tensor (master weights in FP32/FP16)
         threshold_factor: Factor for computing threshold. Default: 0.05
@@ -105,13 +109,17 @@ def ternary_quantize_ste(
     Returns:
         Tuple of (w_tern_ste, scale) where:
             w_tern_ste: Ternary weights with STE gradient passthrough
-            scale: Scaling factors
+            scale: Scaling factors (detached, no gradient)
     """
     w_tern, scale = ternary_quantize(weight, threshold_factor, per_channel)
 
     # STE: forward uses quantized, backward flows through original
     # w_tern_ste has the value of w_tern but gradients flow to weight
     w_tern_ste = w_tern.detach() - weight.detach() + weight
+
+    # Detach scale - it's a calibration statistic, not a learnable path.
+    # This matches CUDA kernel behavior where scale is treated as constant.
+    scale = scale.detach()
 
     return w_tern_ste, scale
 

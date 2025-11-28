@@ -7,7 +7,7 @@ import torch
 def test_import_bittorch():
     """Test that bittorch can be imported."""
     import bittorch
-    assert bittorch.__version__ == "0.1.0"
+    assert bittorch.__version__ == "0.1.1"
 
 
 def test_has_cuda_ext():
