@@ -90,12 +90,12 @@ GPU: NVIDIA RTX A2000 8GB Laptop GPU
 
 | Shape (B,K,N) | nn.Linear FP32 | nn.Linear FP16 | TernaryLinearCUDA | Ratio vs FP32 |
 |---------------|----------------|----------------|-------------------|---------------|
-| (32, 256, 256) | 0.03 ms | 0.02 ms | 0.19 ms | 6.9x slower |
-| (64, 1024, 4096) | 0.26 ms | 0.10 ms | 8.7 ms | 33x slower |
-| (16, 4096, 4096) | 0.64 ms | 0.28 ms | 14.4 ms | 23x slower |
+| (32, 256, 256) | 0.03 ms | 0.03 ms | 0.18 ms | 5.1x slower |
+| (64, 1024, 4096) | 0.28 ms | 0.10 ms | 5.4 ms | 19x slower |
+| (16, 4096, 4096) | 0.66 ms | 0.29 ms | 12.8 ms | 19x slower |
 
-**Note:** Current CUDA kernel is a baseline implementation (one thread per output).
-Optimized kernels with tiling and shared memory are planned for v0.1.3.
+**v0.1.3 Update:** Tiled kernel with shared memory provides 1.4-1.9x speedup over baseline.
+Still slower than cuBLAS, but further optimizations planned.
 
 Run benchmarks yourself:
 ```bash
@@ -143,17 +143,17 @@ y = x @ (w_tern * scale).T + bias
 
 ## Project Status
 
-**v0.1.1** - Current release:
+**v0.1.3** - Current release:
 - [x] Ternary quantization with STE
-- [x] CUDA forward kernel (baseline)
+- [x] CUDA forward kernel (tiled, shared memory)
 - [x] Training support (PyTorch backward)
 - [x] Gradient consistency between Python and CUDA
 - [x] XOR and MNIST examples
-- [x] 102 tests passing
+- [x] 120 tests passing
 
 Coming in future versions:
-- Optimized kernels (tiling, shared memory) - v0.1.3
 - Extended examples (character LM) - v0.1.4
+- Further kernel optimizations (vectorized loads)
 - INT4 quantization path
 
 ## License
