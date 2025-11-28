@@ -30,6 +30,15 @@ from .ternary import (
     ternary_quantize_ste,
 )
 
+# Packed ternary utilities (for inference)
+from .ternary_packed import (
+    pack_ternary,
+    unpack_ternary,
+    pack_ternary_with_scale,
+    get_packed_size,
+    get_memory_reduction,
+)
+
 # INT4 quantization (placeholder for future)
 from .int4 import (
     Int4QuantConfig,
@@ -52,6 +61,12 @@ __all__ = [
     "ternary_quantize",
     "ternary_quantize_ste",
     "dequantize_ternary",
+    # Packed ternary (inference)
+    "pack_ternary",
+    "unpack_ternary",
+    "pack_ternary_with_scale",
+    "get_packed_size",
+    "get_memory_reduction",
     # INT4 (placeholder)
     "Int4QuantConfig",
     "Int4Quantizer",
