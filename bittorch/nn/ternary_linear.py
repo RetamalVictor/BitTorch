@@ -14,6 +14,15 @@ from torch import Tensor
 from ..quant.ternary import TernaryQuantConfig, ternary_quantize_ste
 
 
+def _cuda_kernel_available() -> bool:
+    """Check if CUDA kernel is available."""
+    try:
+        from .. import _C
+        return hasattr(_C, "ternary_linear_forward")
+    except ImportError:
+        return False
+
+
 class TernaryLinear(nn.Module):
     """Linear layer with ternary quantized weights.
 
@@ -26,6 +35,10 @@ class TernaryLinear(nn.Module):
 
     Where w_tern ∈ {-1, 0, +1} and scale is per-channel.
 
+    When running on CUDA with `use_cuda_kernel=True` (default), the forward
+    pass automatically uses the optimized CUDA kernel. Falls back to pure
+    Python implementation on CPU or when kernel is unavailable.
+
     Args:
         in_features: Size of each input sample
         out_features: Size of each output sample
@@ -34,6 +47,8 @@ class TernaryLinear(nn.Module):
         per_channel: If True, use per-channel scaling. Default: True
         quantize: If True, apply ternary quantization. If False, behaves like
             standard nn.Linear (useful for debugging/comparison). Default: True
+        use_cuda_kernel: If True, automatically use CUDA kernel when on GPU.
+            Default: True
 
     Shape:
         - Input: (*, in_features) where * means any number of batch dimensions
@@ -50,6 +65,11 @@ class TernaryLinear(nn.Module):
         >>> y.shape
         torch.Size([8, 32])
 
+        >>> # On CUDA: automatically uses optimized kernel
+        >>> layer = TernaryLinear(64, 32).cuda()
+        >>> x = torch.randn(8, 64, device='cuda')
+        >>> y = layer(x)  # Uses CUDA kernel
+
         >>> # Debug mode: behaves like nn.Linear
         >>> layer_debug = TernaryLinear(64, 32, quantize=False)
     """
@@ -62,6 +82,7 @@ class TernaryLinear(nn.Module):
         threshold_factor: float = 0.05,
         per_channel: bool = True,
         quantize: bool = True,
+        use_cuda_kernel: bool = True,
     ) -> None:
         super().__init__()
         self.in_features = in_features
@@ -69,6 +90,7 @@ class TernaryLinear(nn.Module):
         self.threshold_factor = threshold_factor
         self.per_channel = per_channel
         self.quantize = quantize
+        self.use_cuda_kernel = use_cuda_kernel
 
         # Master weights in full precision
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
@@ -87,8 +109,19 @@ class TernaryLinear(nn.Module):
             bound = 1 / (fan_in**0.5) if fan_in > 0 else 0
             nn.init.uniform_(self.bias, -bound, bound)
 
+    def _should_use_cuda_kernel(self, x: Tensor) -> bool:
+        """Check if we should use CUDA kernel for this forward pass."""
+        return (
+            self.use_cuda_kernel
+            and x.is_cuda
+            and self.weight.is_cuda
+            and _cuda_kernel_available()
+        )
+
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass with ternary quantized weights.
+
+        Automatically uses CUDA kernel when on GPU and use_cuda_kernel=True.
 
         Args:
             x: Input tensor of shape (*, in_features)
@@ -100,6 +133,18 @@ class TernaryLinear(nn.Module):
             # Debug mode: behave like standard nn.Linear
             return F.linear(x, self.weight, self.bias)
 
+        # Use CUDA kernel path when available
+        if self._should_use_cuda_kernel(x):
+            from .ternary_linear_cuda import TernaryLinearCUDAFunction
+            return TernaryLinearCUDAFunction.apply(
+                x,
+                self.weight,
+                self.bias,
+                self.threshold_factor,
+                self.per_channel,
+            )
+
+        # Pure Python fallback
         # Quantize weights with STE for gradient flow
         w_tern, scale = ternary_quantize_ste(
             self.weight,
@@ -123,7 +168,8 @@ class TernaryLinear(nn.Module):
             f"bias={self.bias is not None}, "
             f"threshold_factor={self.threshold_factor}, "
             f"per_channel={self.per_channel}, "
-            f"quantize={self.quantize}"
+            f"quantize={self.quantize}, "
+            f"use_cuda_kernel={self.use_cuda_kernel}"
         )
 
     def get_quantized_weight(self) -> tuple[Tensor, Tensor]:
