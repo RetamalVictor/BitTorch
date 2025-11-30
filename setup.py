@@ -12,8 +12,8 @@ ext_modules = [
         sources=[
             "csrc/core/dispatch.cpp",
             "csrc/bindings/bittorch_bindings.cpp",
-            "csrc/kernels/ternary_gemm.cu",
-            "csrc/kernels/ternary_gemm_packed.cu",
+            "csrc/kernels/ternary_gemm.cu",           # Unpacked weights
+            "csrc/kernels/ternary_gemm_production.cu", # Packed transposed (production)
         ],
         include_dirs=[
             os.path.join(ROOT_DIR, "csrc"),

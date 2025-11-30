@@ -35,6 +35,8 @@ from .ternary_packed import (
     pack_ternary,
     unpack_ternary,
     pack_ternary_with_scale,
+    pack_ternary_transposed,
+    unpack_ternary_transposed,
     get_packed_size,
     get_memory_reduction,
 )
@@ -65,6 +67,8 @@ __all__ = [
     "pack_ternary",
     "unpack_ternary",
     "pack_ternary_with_scale",
+    "pack_ternary_transposed",
+    "unpack_ternary_transposed",
     "get_packed_size",
     "get_memory_reduction",
     # INT4 (placeholder)
