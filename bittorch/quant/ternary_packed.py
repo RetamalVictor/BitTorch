@@ -169,3 +169,55 @@ def get_memory_reduction(out_features: int, in_features: int) -> float:
     packed_bytes = get_packed_size(out_features, in_features)
     scale_bytes = out_features * 2  # FP16 scale
     return fp32_bytes / (packed_bytes + scale_bytes)
+
+
+def pack_ternary_transposed(w_tern: Tensor) -> Tuple[Tensor, int]:
+    """Pack ternary weights with transposed layout for coalesced GPU access.
+
+    This packs weights as [K_bytes, N] instead of [N, K_bytes], which allows
+    consecutive GPU threads (handling consecutive N values) to access
+    consecutive memory addresses.
+
+    The bit encoding within each byte is identical to pack_ternary:
+        00 = 0, 01 = +1, 10 = -1
+
+    Byte at position [kb, n] contains weights W[n, kb*4+0:kb*4+4].
+
+    Args:
+        w_tern: Ternary weights, shape (out_features, in_features).
+                Values must be in {-1, 0, +1}.
+
+    Returns:
+        Tuple of (packed_T, original_in_features) where:
+            packed_T: Packed weights, shape (ceil(in_features/4), out_features),
+                      dtype uint8, contiguous in the N dimension
+            original_in_features: Original in_features dimension (for unpacking)
+
+    Example:
+        >>> w = torch.tensor([[1, -1, 0, 1], [0, 1, 1, -1]], dtype=torch.float32)
+        >>> packed_T, orig_k = pack_ternary_transposed(w)
+        >>> packed_T.shape
+        torch.Size([1, 2])  # [K_bytes, N]
+    """
+    packed, in_features = pack_ternary(w_tern)
+    # Transpose and make contiguous for proper memory layout
+    # Now consecutive N values are consecutive in memory
+    packed_T = packed.T.contiguous()
+    return packed_T, in_features
+
+
+def unpack_ternary_transposed(packed_T: Tensor, in_features: int) -> Tensor:
+    """Unpack transposed uint8 tensor to ternary weights {-1, 0, +1}.
+
+    Args:
+        packed_T: Packed transposed weights, shape (packed_in_features, out_features),
+                  dtype uint8
+        in_features: Original input dimension (removes padding)
+
+    Returns:
+        Ternary weights, shape (out_features, in_features), dtype int8.
+        Values are in {-1, 0, +1}.
+    """
+    # Transpose back to [N, K_bytes] format, then use regular unpack
+    packed = packed_T.T.contiguous()
+    return unpack_ternary(packed, in_features)
