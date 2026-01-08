@@ -93,5 +93,17 @@ ROADMAP-2.md
 # Research journal (not tracked)
 Journal/
 
+# Documentation (not tracked)
+docs/
+
 # Dataset downloads
 data/
+
+# Checkpoints
+checkpoints/
+
+# NCU profiling reports
+*.ncu-rep
+
+# Scripts (local dev)
+scripts/
