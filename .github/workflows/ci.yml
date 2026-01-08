@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: |
+          uv sync --extra dev
+          uv pip install ruff mypy
+
+      - name: Run ruff linter
+        run: uv run ruff check bittorch/ tests/
+
+      - name: Run ruff formatter check
+        run: uv run ruff format --check bittorch/ tests/
+
+      - name: Run mypy
+        run: uv run mypy bittorch/ --ignore-missing-imports --no-error-summary || true
+
+  test-cpu:
+    name: Test (CPU, Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run CPU tests (Python backend)
+        run: |
+          uv run pytest tests/ -v \
+            -m "not slow" \
+            --ignore=tests/test_ternary_cuda.py \
+            --ignore=tests/test_packed_kernel.py \
+            --ignore=tests/test_kernel_regression.py \
+            --ignore=tests/test_benchmark.py \
+            -k "not cuda and not CUDA"
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+
+  test-cuda:
+    name: Test (CUDA)
+    runs-on: ubuntu-latest
+    # Only run CUDA tests on main branch or when explicitly requested
+    if: github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'test-cuda')
+    container:
+      image: pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update && apt-get install -y git
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies and build
+        run: |
+          $HOME/.cargo/bin/uv sync --extra dev
+          $HOME/.cargo/bin/uv build
+
+      - name: Verify CUDA extension
+        run: |
+          $HOME/.cargo/bin/uv run python -c "import bittorch; print(f'CUDA ext: {bittorch.has_cuda_ext()}')"
+
+      - name: Run all tests
+        run: |
+          $HOME/.cargo/bin/uv run pytest tests/ -v -m "not slow"
+
+  # Self-hosted GPU runner job (optional, for repos with GPU runners)
+  test-cuda-self-hosted:
+    name: Test (CUDA, Self-Hosted)
+    runs-on: [self-hosted, gpu]
+    if: github.repository == 'RetamalVictor/bittorch' && (github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'test-gpu'))
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies and build
+        run: |
+          uv sync --extra dev
+          uv build
+
+      - name: Verify CUDA extension
+        run: |
+          uv run python -c "import bittorch; print(f'CUDA ext: {bittorch.has_cuda_ext()}')"
+          nvidia-smi
+
+      - name: Run full test suite
+        run: uv run pytest tests/ -v
+
+      - name: Run benchmarks
+        run: |
+          uv run python benchmark/bench_ternary_vs_linear.py --shapes 32,256,256

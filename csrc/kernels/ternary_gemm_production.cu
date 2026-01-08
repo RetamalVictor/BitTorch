@@ -190,8 +190,8 @@ __global__ void kernel(
         }
 
         // Load W tile from TRANSPOSED layout
-        // tx maps to N (output channel), ty maps to K bytes
         // Use linear indexing: each thread loads one byte, unpacks 4 weights
+        // NOTE: Only 256 of 1024 threads participate in W loading
         {
             const int linear_id = ty * TILE_N + tx;  // 0..1023
 

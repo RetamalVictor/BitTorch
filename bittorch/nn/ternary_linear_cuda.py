@@ -5,7 +5,9 @@ This module implements a linear layer where weights are quantized to ternary val
 computation and PyTorch matmuls for backward (STE).
 """
 
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
@@ -13,16 +15,19 @@ from torch import Tensor
 
 from ..quant.ternary import ternary_quantize
 
+if TYPE_CHECKING:
+    from torch.autograd.function import FunctionCtx
+
 
 class TernaryLinearCUDAFunction(torch.autograd.Function):
     """Autograd function for ternary linear with CUDA forward."""
 
     @staticmethod
     def forward(
-        ctx,
+        ctx: FunctionCtx,
         x: Tensor,
         weight: Tensor,
-        bias: Optional[Tensor],
+        bias: Tensor | None,
         threshold_factor: float,
         per_channel: bool,
     ) -> Tensor:
@@ -62,7 +67,9 @@ class TernaryLinearCUDAFunction(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, grad_output: Tensor):
+    def backward(
+        ctx: FunctionCtx, grad_output: Tensor
+    ) -> tuple[Tensor | None, Tensor | None, Tensor | None, None, None]:
         """Backward pass using PyTorch matmuls (STE).
 
         The STE pattern means gradients flow through quantization as if it

@@ -1,6 +1,6 @@
 """BitTorch: High-performance low-precision backend for PyTorch."""
 
-__version__ = "0.1.5"
+__version__ = "0.2.0"
 
 # Import torch first to load shared libraries needed by the C++ extension
 import torch  # noqa: F401
