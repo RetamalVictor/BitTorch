@@ -39,10 +39,12 @@ def ternary_linear_forward_cuda(
     # Ensure contiguous tensors
     x = x.contiguous()
     w_tern = w_tern.contiguous()
-    scale = scale.contiguous()
+
+    # Cast scale and bias to match input dtype (for mixed precision compatibility)
+    scale = scale.to(dtype=x.dtype).contiguous()
 
     if bias is not None:
-        bias = bias.contiguous()
+        bias = bias.to(dtype=x.dtype).contiguous()
 
     return ternary_linear_forward(x, w_tern, scale, bias)
 
