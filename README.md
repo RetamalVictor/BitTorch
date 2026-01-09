@@ -1,32 +1,23 @@
 # BitTorch
 
-High-performance low-precision backend for PyTorch, targeting ternary (1.58-bit) weights.
+High-performance ternary (1.58-bit) backend for PyTorch.
 
-## What is BitTorch?
+## What It Does
 
-BitTorch provides drop-in replacements for `nn.Linear` that use **ternary quantized weights** ({-1, 0, +1}) during forward pass while maintaining full-precision master weights for training. This enables:
+Drop-in `nn.Linear` replacements with **ternary quantized weights** ({-1, 0, +1}). Master weights stay in FP32 for training; quantization happens on forward pass via Straight-Through Estimator.
 
-- **~20x weight compression** (32-bit → 1.58-bit per weight)
-- **Potential 2-4x speedups** with optimized kernels (multiplication becomes add/negate/skip)
-- **Edge deployment** - fit larger models in constrained memory
+- ~20x weight compression (32-bit → 1.58-bit)
+- CUDA kernel for GPU inference
+- Works with standard PyTorch training loops
 
-Inspired by [BitNet b1.58](https://arxiv.org/abs/2402.17764) and related work on low-precision neural networks.
+Inspired by [BitNet b1.58](https://arxiv.org/abs/2402.17764).
 
 ## Installation
 
-Requires CUDA toolkit and PyTorch with CUDA support.
-
 ```bash
-# Clone and install
 git clone https://github.com/RetamalVictor/bittorch.git
 cd bittorch
-
-# Using uv (recommended)
-uv sync
-uv build
-
-# Or using pip
-pip install -e .
+uv sync && uv build
 ```
 
 ## Quick Start
@@ -36,146 +27,47 @@ import torch
 from bittorch.nn import TernaryLinear
 
 # Drop-in replacement for nn.Linear
-layer = TernaryLinear(64, 32)
-
-# Forward pass uses ternary weights
-x = torch.randn(8, 64)
+layer = TernaryLinear(512, 256).cuda()
+x = torch.randn(32, 512, device='cuda')
 y = layer(x)
 
-# On CUDA: automatically uses optimized kernel
-layer = TernaryLinear(64, 32).cuda()
-x = torch.randn(8, 64, device='cuda')
-y = layer(x)  # Uses CUDA kernel automatically
-
-# Inspect quantized weights
+# Check quantized weights
 w_tern, scale = layer.get_quantized_weight()
-print(f"Unique values: {torch.unique(w_tern)}")  # tensor([-1., 0., 1.])
+print(torch.unique(w_tern))  # tensor([-1., 0., 1.])
 ```
 
 ## Examples
 
-### XOR MLP
-
 ```bash
-# CPU (pure Python)
-uv run python examples/xor_mlp.py
-
-# GPU (CUDA kernel)
+# XOR MLP
 uv run python examples/xor_mlp.py --cuda
-```
 
-### MNIST MLP
-
-```bash
-# Compare ternary vs FP32
+# MNIST (compare ternary vs FP32)
 uv run python examples/mnist_mlp_ternary.py --compare --epochs 5
+
+# Character-level LM
+uv run python examples/tiny_char_lm_ternary.py --cuda --epochs 10
 ```
 
-### Character-Level Language Model
+## Benchmarks
 
-```bash
-# Train ternary character LM
-uv run python examples/tiny_char_lm_ternary.py --epochs 5
-
-# Compare ternary vs FP32 perplexity
-uv run python examples/tiny_char_lm_ternary.py --compare --cuda
-
-# Download TinyShakespeare for larger training
-uv run python examples/tiny_char_lm_ternary.py --download --compare --cuda --epochs 10
-```
-
-## Benchmark Results
-
-### Training Accuracy (MNIST MLP)
-
-784 → 256 → 128 → 10, 5 epochs:
-
-| Model | Test Accuracy |
-|-------|---------------|
-| FP32 nn.Linear | 97.3% |
-| TernaryLinear (CUDA) | 94.3% |
-
-The ~3% accuracy gap is expected for 1.58-bit quantization.
-
-### Forward Pass Performance
-
-GPU: NVIDIA RTX A2000 8GB Laptop GPU
-
-| Shape (B,K,N) | nn.Linear FP32 | nn.Linear FP16 | TernaryLinearCUDA | Ratio vs FP32 |
-|---------------|----------------|----------------|-------------------|---------------|
-| (32, 256, 256) | 0.03 ms | 0.03 ms | 0.18 ms | 5.1x slower |
-| (64, 1024, 4096) | 0.28 ms | 0.10 ms | 5.4 ms | 19x slower |
-| (16, 4096, 4096) | 0.66 ms | 0.29 ms | 12.8 ms | 19x slower |
-
-**v0.1.3 Update:** Tiled kernel with shared memory provides 1.4-1.9x speedup over baseline.
-Still slower than cuBLAS, but further optimizations planned.
-
-Run benchmarks yourself:
 ```bash
 uv run python benchmark/bench_ternary_vs_linear.py --shapes all
-uv run python benchmark/bench_ternary_kernel_only.py  # Raw kernel timing
 ```
 
-## API Reference
+Current status: CUDA kernel is functional but slower than cuBLAS. Optimizations ongoing.
 
-### `bittorch.nn.TernaryLinear`
+## API
 
 ```python
 TernaryLinear(
     in_features: int,
     out_features: int,
     bias: bool = True,
-    threshold_factor: float = 0.05,  # Controls sparsity
-    per_channel: bool = True,        # Per-channel vs global scaling
-    quantize: bool = True,           # Set False for debug mode
-    backend: str = "auto",           # "auto", "cuda", or "python"
+    threshold_factor: float = 0.05,
+    backend: str = "auto",  # "auto", "cuda", "python"
 )
 ```
-
-Backend options:
-- `"auto"`: Uses CUDA kernel when on GPU and available, otherwise Python (default)
-- `"cuda"`: Forces CUDA kernel (raises error if unavailable or on CPU)
-- `"python"`: Forces pure Python implementation (useful for debugging)
-
-### `bittorch.nn.TernaryLinearCUDA`
-
-Explicit CUDA-only module (raises error on CPU input):
-
-```python
-from bittorch.nn import TernaryLinearCUDA
-
-layer = TernaryLinearCUDA(64, 32).cuda()
-```
-
-## How It Works
-
-1. **Master weights** stored in FP32 for optimizer updates
-2. **Ternary quantization** on forward: `w_tern = sign(w) if |w| > threshold else 0`
-3. **Per-channel scaling**: `scale = max(|w|)` per output channel
-4. **Straight-Through Estimator (STE)**: gradients flow through quantization as if identity
-
-The effective forward computation:
-```
-y = x @ (w_tern * scale).T + bias
-```
-
-## Project Status
-
-**v0.1.5** - Current release:
-- [x] Ternary quantization with STE
-- [x] CUDA forward kernel (tiled, shared memory)
-- [x] Training support (PyTorch backward)
-- [x] Gradient consistency between Python and CUDA
-- [x] XOR, MNIST, and character LM examples
-- [x] Backend parameter (`"auto"`, `"cuda"`, `"python"`)
-- [x] Robustness tests (various shapes, seeds, big shapes)
-- [x] Extensible quantization framework (ready for INT4)
-- [x] Developer documentation (CONTRIBUTING.md, kernel docs)
-- [x] 185+ tests passing
-
-Coming in future versions:
-- INT4 quantization implementation
-- Further kernel optimizations (vectorized loads)
 
 ## License
 
@@ -184,10 +76,10 @@ MIT
 ## Citation
 
 ```bibtex
-@software{bittorch2024,
+@software{bittorch2025,
   author = {Victor Retamal},
-  title = {BitTorch: High-performance low-precision backend for PyTorch},
-  year = {2024},
+  title = {BitTorch: Ternary quantization backend for PyTorch},
+  year = {2025},
   url = {https://github.com/RetamalVictor/bittorch}
 }
 ```
