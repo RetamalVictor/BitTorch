@@ -12,15 +12,18 @@ ext_modules = [
         sources=[
             "csrc/core/dispatch.cpp",
             "csrc/bindings/bittorch_bindings.cpp",
-            "csrc/kernels/ternary_gemm.cu",           # Unpacked weights
-            "csrc/kernels/ternary_gemm_production.cu", # Packed transposed (production)
+            "csrc/kernels/ternary_gemm.cu",              # Unpacked weights
+            "csrc/kernels/ternary_gemm_production.cu",   # Packed transposed (production)
+            "csrc/kernels/ternary_gemm_tensor_core.cu",  # Tensor Core kernel (experimental)
         ],
         include_dirs=[
             os.path.join(ROOT_DIR, "csrc"),
         ],
         extra_compile_args={
             "cxx": ["-O3"],
-            "nvcc": ["-O3"],
+            # -arch=sm_86 for Ampere (RTX 30xx, A100, etc.)
+            # Enables mma.sync INT8 instructions
+            "nvcc": ["-O3", "-arch=sm_86"],
         },
     )
 ]

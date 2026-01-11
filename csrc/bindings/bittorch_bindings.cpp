@@ -18,6 +18,17 @@ torch::Tensor ternary_linear_packed_forward(
     c10::optional<torch::Tensor> bias,
     int64_t in_features);
 
+// Tensor Core kernel
+namespace tensor_core {
+torch::Tensor ternary_gemm_tensor_core_cuda(
+    torch::Tensor X,
+    torch::Tensor W_T,
+    torch::Tensor scale,
+    c10::optional<torch::Tensor> bias,
+    int64_t in_features,
+    int64_t version);
+} // namespace tensor_core
+
 } // namespace bittorch
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -50,4 +61,28 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         py::arg("scale"),
         py::arg("bias") = py::none(),
         py::arg("in_features"));
+
+  m.def("ternary_linear_tensor_core_forward", &bittorch::tensor_core::ternary_gemm_tensor_core_cuda,
+        R"doc(
+        Tensor Core ternary linear forward pass.
+
+        Uses INT8 Tensor Cores with LUT-based 2-bit to INT8 unpacking.
+
+        Args:
+            X: Input tensor [B, K] float32
+            W_T: Packed transposed weights [K_bytes, N] uint8
+            scale: Per-channel scale [N] float32
+            bias: Optional bias [N] float32
+            in_features: Number of input features (K)
+            version: Kernel version (1=V1 float compute, 2=V2 mma.sync)
+
+        Returns:
+            Output tensor [B, N] float32
+        )doc",
+        py::arg("X"),
+        py::arg("W_T"),
+        py::arg("scale"),
+        py::arg("bias") = py::none(),
+        py::arg("in_features"),
+        py::arg("version") = 1);
 }
