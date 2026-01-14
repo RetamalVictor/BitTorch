@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.cuda.amp import custom_fwd, custom_bwd
 
 from ..quant.ternary import ternary_quantize
 
@@ -23,6 +24,7 @@ class TernaryLinearCUDAFunction(torch.autograd.Function):
     """Autograd function for ternary linear with CUDA forward."""
 
     @staticmethod
+    @custom_fwd(cast_inputs=torch.float16)
     def forward(
         ctx: FunctionCtx,
         x: Tensor,
@@ -67,6 +69,7 @@ class TernaryLinearCUDAFunction(torch.autograd.Function):
         return output
 
     @staticmethod
+    @custom_bwd
     def backward(
         ctx: FunctionCtx, grad_output: Tensor
     ) -> tuple[Tensor | None, Tensor | None, Tensor | None, None, None]:

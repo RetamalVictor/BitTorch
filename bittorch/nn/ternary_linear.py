@@ -204,8 +204,13 @@ class TernaryLinear(nn.Module):
         # scale: (out_features,)
         w_effective = w_tern * scale.unsqueeze(1)
 
+        # Cast to input dtype for AMP compatibility
+        # Under autocast, x may be FP16 while weights are FP32
+        w_effective = w_effective.to(x.dtype)
+        bias = self.bias.to(x.dtype) if self.bias is not None else None
+
         # Linear transformation
-        return F.linear(x, w_effective, self.bias)
+        return F.linear(x, w_effective, bias)
 
     def extra_repr(self) -> str:
         """String representation with extra info."""
