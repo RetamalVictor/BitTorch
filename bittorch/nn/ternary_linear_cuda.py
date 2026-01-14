@@ -24,7 +24,7 @@ class TernaryLinearCUDAFunction(torch.autograd.Function):
     """Autograd function for ternary linear with CUDA forward."""
 
     @staticmethod
-    @custom_fwd
+    @custom_fwd(cast_inputs=torch.float16)
     def forward(
         ctx: FunctionCtx,
         x: Tensor,
