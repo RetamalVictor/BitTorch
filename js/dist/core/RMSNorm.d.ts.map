@@ -1,0 +1,1 @@
+{"version":3,"file":"RMSNorm.d.ts","sourceRoot":"","sources":["../../src/core/RMSNorm.ts"],"names":[],"mappings":"AAAA;;;;;;GAMG;AAKH;;;;;;;;GAQG;AACH,wBAAgB,OAAO,CACrB,CAAC,EAAE,YAAY,EACf,MAAM,EAAE,YAAY,EACpB,MAAM,EAAE,MAAM,EACd,GAAG,EAAE,MAAM,GACV,YAAY,CAqBd;AAED;;;;;;;;GAQG;AACH,wBAAgB,aAAa,CAC3B,CAAC,EAAE,YAAY,EACf,MAAM,EAAE,YAAY,GACnB,YAAY,CAiBd"}

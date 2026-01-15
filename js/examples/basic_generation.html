@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>bittorch.js - Basic Generation Example</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 2rem;
+      background: #0a0a0a;
+      color: #e0e0e0;
+    }
+    h1 {
+      color: #fff;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: #888;
+      margin-bottom: 2rem;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 0.75rem;
+      font-size: 1rem;
+      border: 1px solid #333;
+      border-radius: 4px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    button {
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 0.5rem;
+    }
+    button:hover {
+      background: #2563eb;
+    }
+    button:disabled {
+      background: #444;
+      cursor: not-allowed;
+    }
+    .output {
+      margin-top: 2rem;
+      padding: 1rem;
+      background: #1a1a1a;
+      border-radius: 4px;
+      border: 1px solid #333;
+      min-height: 200px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      line-height: 1.5;
+    }
+    .stats {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #1a1a1a;
+      border-radius: 4px;
+      border: 1px solid #333;
+      font-size: 0.875rem;
+    }
+    .stats span {
+      margin-right: 2rem;
+      color: #888;
+    }
+    .stats strong {
+      color: #fff;
+    }
+    .status {
+      margin-top: 1rem;
+      padding: 0.5rem;
+      border-radius: 4px;
+      font-size: 0.875rem;
+    }
+    .status.loading {
+      background: #2a2a00;
+      border: 1px solid #555500;
+    }
+    .status.ready {
+      background: #0a2a0a;
+      border: 1px solid #005500;
+    }
+    .status.error {
+      background: #2a0a0a;
+      border: 1px solid #550000;
+    }
+  </style>
+</head>
+<body>
+  <h1>bittorch.js</h1>
+  <p class="subtitle">Browser inference with ternary-quantized transformers</p>
+
+  <div id="status" class="status loading">Loading model...</div>
+
+  <div class="form-group">
+    <label for="prompt">Prompt:</label>
+    <input type="text" id="prompt" value="Once upon a time" placeholder="Enter your prompt...">
+  </div>
+
+  <div class="form-group">
+    <label for="maxTokens">Max Tokens:</label>
+    <input type="number" id="maxTokens" value="50" min="1" max="200">
+  </div>
+
+  <div>
+    <button id="generateBtn" disabled>Generate</button>
+    <button id="stopBtn" disabled>Stop</button>
+  </div>
+
+  <div class="output" id="output"></div>
+
+  <div class="stats" id="stats">
+    <span>Tokens/sec: <strong id="tps">-</strong></span>
+    <span>Total: <strong id="totalTokens">-</strong></span>
+    <span>Time: <strong id="elapsed">-</strong></span>
+    <span>GPU: <strong id="gpuEnabled">-</strong></span>
+  </div>
+
+  <script type="module">
+    // Note: In production, import from '@bittorch/js'
+    // For local development, adjust the path to your built dist
+    import { TernaryTransformer } from '../dist/index.js';
+
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+    const promptEl = document.getElementById('prompt');
+    const maxTokensEl = document.getElementById('maxTokens');
+    const generateBtn = document.getElementById('generateBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const tpsEl = document.getElementById('tps');
+    const totalTokensEl = document.getElementById('totalTokens');
+    const elapsedEl = document.getElementById('elapsed');
+    const gpuEnabledEl = document.getElementById('gpuEnabled');
+
+    let model = null;
+
+    async function loadModel() {
+      try {
+        statusEl.textContent = 'Loading model...';
+        statusEl.className = 'status loading';
+
+        // Update this path to your model location
+        const modelPath = '/model';
+
+        model = await TernaryTransformer.load(modelPath);
+
+        gpuEnabledEl.textContent = model.isGPUEnabled ? 'Yes' : 'No (CPU)';
+
+        const mem = model.memoryStats;
+        statusEl.textContent = `Ready! Packed: ${mem.packedWeightsKB.toFixed(0)}KB (${mem.compressionRatio.toFixed(1)}x compression)`;
+        statusEl.className = 'status ready';
+
+        generateBtn.disabled = false;
+      } catch (err) {
+        statusEl.textContent = `Error: ${err.message}`;
+        statusEl.className = 'status error';
+        console.error(err);
+      }
+    }
+
+    async function generate() {
+      if (!model) return;
+
+      const prompt = promptEl.value;
+      const maxTokens = parseInt(maxTokensEl.value, 10);
+
+      generateBtn.disabled = true;
+      stopBtn.disabled = false;
+      outputEl.textContent = prompt;
+
+      try {
+        await model.generate(prompt, {
+          maxTokens,
+          temperature: 0.8,
+          onToken: (token, stats) => {
+            outputEl.textContent += token;
+            tpsEl.textContent = stats.tokensPerSecond.toFixed(1);
+            totalTokensEl.textContent = stats.totalTokens.toString();
+            elapsedEl.textContent = (stats.elapsedMs / 1000).toFixed(1) + 's';
+          },
+        });
+      } catch (err) {
+        console.error('Generation error:', err);
+      }
+
+      generateBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    function stop() {
+      if (model) {
+        model.stop();
+      }
+    }
+
+    generateBtn.addEventListener('click', generate);
+    stopBtn.addEventListener('click', stop);
+
+    // Start loading
+    loadModel();
+  </script>
+</body>
+</html>
