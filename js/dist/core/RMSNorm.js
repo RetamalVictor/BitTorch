@@ -58,4 +58,24 @@ export function rmsNormSingle(x, weight) {
     }
     return result;
 }
+/**
+ * RMSNorm for a single vector - in-place version.
+ *
+ * @param x - Input vector [dim]
+ * @param weight - Scale weights [dim]
+ * @param output - Pre-allocated output buffer [dim]
+ */
+export function rmsNormSingleInto(x, weight, output) {
+    const dim = x.length;
+    // Compute RMS
+    let sumSq = 0;
+    for (let d = 0; d < dim; d++) {
+        sumSq += x[d] * x[d];
+    }
+    const rms = Math.sqrt(sumSq / dim + NORM_EPS);
+    // Normalize and scale
+    for (let d = 0; d < dim; d++) {
+        output[d] = (x[d] / rms) * weight[d];
+    }
+}
 //# sourceMappingURL=RMSNorm.js.map

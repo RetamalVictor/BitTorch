@@ -36,6 +36,7 @@ export declare class TernaryTransformer {
     private stopRequested;
     private ternaryWeights;
     private fp16Weights;
+    private decodeBuffers;
     private constructor();
     /**
      * Load model from a directory containing config.json, tokenizer.json, and model.safetensors.
@@ -44,6 +45,10 @@ export declare class TernaryTransformer {
      * @returns Promise resolving to TernaryTransformer instance
      */
     static load(basePath: string): Promise<TernaryTransformer>;
+    /**
+     * Initialize pre-allocated buffers for decode (called once after load).
+     */
+    private initDecodeBuffers;
     /**
      * Get model configuration.
      */
@@ -76,11 +81,18 @@ export declare class TernaryTransformer {
     private forwardPrefill;
     private forwardDecode;
     private ternaryMatmulDispatch;
-    private ternaryMatmulSingleDispatch;
     private swiglu;
-    private swigluSingle;
+    /**
+     * Optimized SwiGLU MLP using pre-allocated buffers.
+     * Writes result to buf.mlpOut.
+     */
+    private swigluSingleOptimized;
+    /**
+     * Optimized attention decode using pre-allocated buffers.
+     * Writes result to buf.attnOut.
+     */
+    private attentionDecodeOptimized;
     private attentionPrefill;
-    private attentionDecode;
     private sample;
 }
 //# sourceMappingURL=TernaryTransformer.d.ts.map

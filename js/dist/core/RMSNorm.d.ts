@@ -25,4 +25,12 @@ export declare function rmsNorm(x: Float32Array, weight: Float32Array, seqLen: n
  * @returns Normalized vector [dim]
  */
 export declare function rmsNormSingle(x: Float32Array, weight: Float32Array): Float32Array;
+/**
+ * RMSNorm for a single vector - in-place version.
+ *
+ * @param x - Input vector [dim]
+ * @param weight - Scale weights [dim]
+ * @param output - Pre-allocated output buffer [dim]
+ */
+export declare function rmsNormSingleInto(x: Float32Array, weight: Float32Array, output: Float32Array): void;
 //# sourceMappingURL=RMSNorm.d.ts.map
