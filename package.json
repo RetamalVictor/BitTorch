@@ -1,0 +1,30 @@
+{
+  "name": "@bittorch/js",
+  "version": "0.1.0",
+  "description": "JavaScript/WebGPU inference library for ternary neural networks",
+  "type": "module",
+  "main": "js/dist/index.js",
+  "types": "js/dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./js/dist/index.js",
+      "types": "./js/dist/index.d.ts"
+    }
+  },
+  "files": [
+    "js/dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RetamalVictor/BitTorch.git"
+  },
+  "keywords": [
+    "ternary",
+    "quantization",
+    "webgpu",
+    "inference",
+    "transformer",
+    "llm"
+  ],
+  "license": "MIT"
+}
