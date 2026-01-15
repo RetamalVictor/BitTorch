@@ -84,6 +84,10 @@ export declare class BPETokenizer {
      */
     decodeToken(id: number): string;
     /**
+     * Clean up special token encodings in text.
+     */
+    private cleanText;
+    /**
      * Get token ID for a single token string.
      *
      * @param token - Token string

@@ -203,8 +203,8 @@ export class BPETokenizer {
     decode(ids) {
         const tokens = ids.map((id) => this.decoder.get(id) ?? "");
         let text = tokens.join("");
-        // Replace Ġ with space
-        text = text.replace(/Ġ/g, " ");
+        // Replace special tokens with their actual characters
+        text = this.cleanText(text);
         return text;
     }
     /**
@@ -215,7 +215,19 @@ export class BPETokenizer {
      */
     decodeToken(id) {
         const token = this.decoder.get(id) ?? "";
-        return token.replace(/Ġ/g, " ");
+        return this.cleanText(token);
+    }
+    /**
+     * Clean up special token encodings in text.
+     */
+    cleanText(text) {
+        return text
+            .replace(/Ġ/g, " ") // Space prefix
+            .replace(/Ċ/g, "\n") // Newline
+            .replace(/ĉ/g, "\t") // Tab
+            .replace(/@-@/g, "-") // Hyphen encoding
+            .replace(/Ã/g, "") // Remove stray encoding artifacts
+            .replace(/â/g, "'"); // Smart quote encoding
     }
     /**
      * Get token ID for a single token string.
