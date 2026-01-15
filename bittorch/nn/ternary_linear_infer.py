@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from ..quant.ternary_packed import pack_ternary, unpack_ternary
+from ..quant.ternary_packed import pack_ternary, pack_ternary_transposed, unpack_ternary, unpack_ternary_transposed
 
 
 class TernaryLinearInference(nn.Module):
@@ -31,7 +31,7 @@ class TernaryLinearInference(nn.Module):
         2. Computes y = x @ (w_tern * scale).T + bias
 
     Attributes:
-        weight_packed: Packed ternary weights, shape (out_features, ceil(in_features/4))
+        weight_packed: Packed ternary weights in TRANSPOSED layout, shape (ceil(in_features/4), out_features)
         scale: Per-channel scaling factors, shape (out_features,)
         bias: Optional bias, shape (out_features,)
         in_features: Original input dimension
@@ -97,7 +97,8 @@ class TernaryLinearInference(nn.Module):
             )
         else:
             # CPU fallback: unpack + matmul (slow but simple)
-            w_tern = unpack_ternary(self.weight_packed, self.in_features)
+            # weight_packed is transposed [K_bytes, N], unpack gives [N, K]
+            w_tern = unpack_ternary_transposed(self.weight_packed, self.in_features)
             w_tern = w_tern.to(x.dtype)
             w_effective = w_tern * self.scale.unsqueeze(1).to(x.dtype)
             return torch.nn.functional.linear(x, w_effective, self.bias)
@@ -136,7 +137,8 @@ class TernaryLinearInference(nn.Module):
             TernaryLinearInference instance
         """
         out_features, in_features = w_tern.shape
-        weight_packed, _ = pack_ternary(w_tern)
+        # Use transposed layout [K_bytes, N] for optimal GPU memory access
+        weight_packed, _ = pack_ternary_transposed(w_tern)
         return cls(
             in_features=in_features,
             out_features=out_features,
