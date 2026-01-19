@@ -101,14 +101,27 @@ export class TernaryTransformer {
             const norm1 = loader.getTensorFloat32(`${prefix}.norm1.weight`);
             const norm2 = loader.getTensorFloat32(`${prefix}.norm2.weight`);
             // Helper to load ternary layer
+            // Model stores weights as [inBytes, outFeatures] but matmul expects [outFeatures, inBytes]
+            // So we transpose during loading
             const loadTernary = (name) => {
                 const weightTensor = loader.getTensorUint8(`${name}.weight_packed`);
                 const scaleTensor = loader.getTensorFloat32(`${name}.scale`);
-                const outFeatures = weightTensor.shape[0];
-                const inFeatures = weightTensor.shape[1] * 4;
+                // Scale length gives us outFeatures (one scale per output channel)
+                const outFeatures = scaleTensor.data.length;
+                // shape[0] is inBytes (packed), so inFeatures = shape[0] * 4
+                const inBytes = weightTensor.shape[0];
+                const inFeatures = inBytes * 4;
+                // Transpose weights from [inBytes, outFeatures] to [outFeatures, inBytes]
+                const transposedWeights = new Uint8Array(outFeatures * inBytes);
+                const srcWeights = weightTensor.data;
+                for (let n = 0; n < outFeatures; n++) {
+                    for (let b = 0; b < inBytes; b++) {
+                        transposedWeights[n * inBytes + b] = srcWeights[b * outFeatures + n];
+                    }
+                }
                 ternaryWeights += outFeatures * inFeatures;
                 return {
-                    weightsPacked: weightTensor.data,
+                    weightsPacked: transposedWeights,
                     scales: scaleTensor.data,
                     outFeatures,
                     inFeatures,
